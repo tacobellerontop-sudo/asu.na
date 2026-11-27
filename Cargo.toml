@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = ["crates/asuna-core", "crates/asuna-app"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/tacobellerontop-sudo/asu.na"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 8
+strip = true
+panic = "abort"
+
+# Keep debug builds usable: optimize dependencies (GPUI is slow unoptimized).
+[profile.dev.package."*"]
+opt-level = 1

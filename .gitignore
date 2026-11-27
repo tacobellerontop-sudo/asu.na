@@ -1,5 +1,4 @@
-node_modules/
-out/
-dist/
+/target
 *.log
 .DS_Store
+dist/
