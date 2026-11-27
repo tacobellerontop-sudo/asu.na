@@ -72,11 +72,12 @@ The first build compiles GPUI and takes several minutes.
 ## Releases
 
 `.github/workflows/build.yml` tests the core on Windows, macOS and Linux and builds the app for all three on
-every push and pull request. Pushing a version tag publishes a GitHub Release:
+every push and pull request.
 
-```bash
-git tag v0.2.0 && git push origin v0.2.0
-```
+To publish a release, bump `version` under `[workspace.package]` in `Cargo.toml` and merge to `main`. When that
+version has no tag yet, the workflow creates the `vX.Y.Z` tag and a GitHub Release with the Windows, macOS and
+Linux builds attached. Versions with a hyphen (such as `0.3.0-beta.1`) are marked as pre-releases. Pushing a
+`v*` tag by hand still works too.
 
 ## Layout
 
