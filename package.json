@@ -23,15 +23,44 @@
       "out/**/*"
     ],
     "win": {
-      "target": "nsis"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
     },
     "mac": {
-      "target": "dmg",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
       "category": "public.app-category.games"
     },
     "linux": {
-      "target": "AppImage",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "category": "Game"
+    },
+    "directories": {
+      "output": "dist"
+    },
+    "artifactName": "AsuNa-Launcher-${version}-${os}-${arch}.${ext}",
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
     }
   },
   "devDependencies": {
@@ -49,5 +78,7 @@
   "dependencies": {
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
-  }
+  },
+  "author": "AsuNa",
+  "homepage": "https://github.com/tacobellerontop-sudo/asu.na"
 }

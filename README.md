@@ -43,6 +43,22 @@ npm run typecheck
 npm run dist:win   # Windows installer in dist/
 ```
 
+## Releases
+
+`.github/workflows/build.yml` runs on every push and pull request: typecheck, tests, then installers for
+Windows (`.exe`), macOS (`.dmg`) and Linux (`.AppImage`), kept as workflow artifacts.
+
+To publish a release, push a version tag:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The installers get the tag's version and are attached to a new GitHub Release. Tags with a dash
+(`v0.2.0-beta.1`) are marked as pre-releases. Builds are unsigned for now, so Windows SmartScreen and macOS
+Gatekeeper will warn on first launch.
+
 ## Layout
 
 ```
