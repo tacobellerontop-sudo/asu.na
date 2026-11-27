@@ -153,11 +153,16 @@ pub enum GameAction {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Art {
     /// Portrait box art (roughly 2:3).
     pub cover: Option<String>,
     /// Landscape header.
     pub header: Option<String>,
+    /// Wide background banner (roughly 3:1), used for the featured game.
+    pub hero: Option<String>,
+    /// Transparent title logo drawn over the hero.
+    pub logo: Option<String>,
 }
 
 /// A game as a provider reports it, before user state is merged in.

@@ -606,10 +606,18 @@ impl AsunaApp {
         }
         let mut wanted: Vec<String> = Vec::new();
         let mut seen = HashSet::new();
+        // Wide banners and logos are big, so only fetch them for the games the home page features.
+        let featured: Vec<String> = self
+            .continue_playing()
+            .iter()
+            .flat_map(|g| [g.info.art.hero.clone(), g.info.art.logo.clone()])
+            .flatten()
+            .collect();
         let urls = self
             .games
             .iter()
             .flat_map(|g| [g.info.art.cover.clone(), g.info.art.header.clone()])
+            .chain(featured.into_iter().map(Some))
             .chain(self.store_results.iter().flatten().map(|r| r.image.clone()))
             .flatten();
         for url in urls {
@@ -619,7 +627,7 @@ impl AsunaApp {
             let path = art::cache_path(&self.art_dir, &url);
             if path.exists() {
                 self.art.insert(url, ArtState::Ready(path));
-            } else if path.with_extension("miss").exists() {
+            } else if art::miss_path(&self.art_dir, &url).exists() {
                 self.art.insert(url, ArtState::Missing);
             } else if self.data.settings.online_lookups {
                 self.art.insert(url.clone(), ArtState::Loading);

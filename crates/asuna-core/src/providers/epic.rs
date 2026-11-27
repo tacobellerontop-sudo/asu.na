@@ -96,6 +96,8 @@ fn art_from(images: &[KeyImage]) -> Art {
     Art {
         cover: pick(&["DieselGameBoxTall", "OfferImageTall", "Thumbnail"]),
         header: pick(&["DieselGameBox", "OfferImageWide", "DieselStoreFrontWide"]),
+        hero: pick(&["DieselStoreFrontWide", "OfferImageWide", "DieselGameBox"]),
+        logo: pick(&["DieselGameBoxLogo"]),
     }
 }
 
