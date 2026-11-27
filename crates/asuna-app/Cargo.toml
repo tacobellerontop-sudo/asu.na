@@ -1,0 +1,25 @@
+[package]
+name = "asuna-app"
+description = "AsuNa Launcher: one game manager for every launcher."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "asuna"
+path = "src/main.rs"
+
+[dependencies]
+asuna-core = { path = "../asuna-core" }
+# GPUI (from the Zed team) plus the gpui-component widget kit, pinned together.
+gpui-kit = "=0.9.1"
+serde_json = "1"
+log = "0.4"
+env_logger = "0.11"
+
+# Used by `cargo bundle` to build the macOS .app.
+[package.metadata.bundle]
+name = "AsuNa Launcher"
+identifier = "na.asu.launcher"
+category = "public.app-category.games"
+short_description = "One game manager for every launcher."
