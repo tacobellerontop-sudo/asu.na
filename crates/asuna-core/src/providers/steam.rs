@@ -19,7 +19,57 @@ pub fn art(appid: &str) -> Art {
     Art {
         cover: Some(format!("{CDN}/{appid}/library_600x900.jpg")),
         header: Some(format!("{CDN}/{appid}/header.jpg")),
+        hero: Some(format!("{CDN}/{appid}/library_hero.jpg")),
+        logo: Some(format!("{CDN}/{appid}/logo.png")),
     }
+}
+
+/// Newer Steam apps keep their art under hashed paths, so the plain CDN URLs from [`art`]
+/// return 404. For such a URL this gives the app id and the store asset key to look up.
+pub fn asset_key_for(url: &str) -> Option<(&str, &'static str)> {
+    let rest = url.strip_prefix(CDN)?.strip_prefix('/')?;
+    let (appid, file) = rest.split_once('/')?;
+    let key = match file {
+        "library_600x900.jpg" => "library_capsule",
+        "header.jpg" => "header",
+        "library_hero.jpg" => "library_hero",
+        "logo.png" => "library_logo",
+        _ => return None,
+    };
+    appid.bytes().all(|b| b.is_ascii_digit()).then_some((appid, key))
+}
+
+/// Public store API that lists an app's current asset file names and their hashed folder.
+pub fn store_assets_url(appid: &str) -> String {
+    let input = json!({
+        "ids": [{ "appid": appid.parse::<u64>().unwrap_or(0) }],
+        "context": { "language": "english", "country_code": "US" },
+        "data_request": { "include_assets": true }
+    });
+    let mut q = String::new();
+    for b in input.to_string().bytes() {
+        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
+            q.push(b as char);
+        } else {
+            q.push_str(&format!("%{b:02X}"));
+        }
+    }
+    format!("https://api.steampowered.com/IStoreBrowseService/GetItems/v1?input_json={q}")
+}
+
+const ASSET_BASE: &str = "https://shared.akamai.steamstatic.com/store_item_assets/";
+
+/// Turns a GetItems response into full image URLs keyed by asset name (library_capsule, header, …).
+pub fn parse_store_assets(v: &serde_json::Value) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    let Some(assets) = v.pointer("/response/store_items/0/assets") else { return out };
+    let Some(format) = assets.get("asset_url_format").and_then(|f| f.as_str()) else { return out };
+    for key in ["library_capsule", "library_capsule_2x", "header", "library_hero", "library_logo", "main_capsule"] {
+        if let Some(file) = assets.get(key).and_then(|f| f.as_str()) {
+            out.insert(key.to_string(), format!("{ASSET_BASE}{}", format.replace("${FILENAME}", file)));
+        }
+    }
+    out
 }
 
 pub fn actions(appid: &str) -> Actions {
@@ -248,6 +298,31 @@ impl Provider for Steam {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn maps_cdn_urls_to_store_assets() {
+        let a = art("3241660");
+        assert_eq!(asset_key_for(a.cover.as_deref().unwrap()), Some(("3241660", "library_capsule")));
+        assert_eq!(asset_key_for(a.hero.as_deref().unwrap()), Some(("3241660", "library_hero")));
+        assert_eq!(asset_key_for("https://example.com/x.jpg"), None);
+        assert!(store_assets_url("3241660").contains("%22appid%22%3A3241660"));
+    }
+
+    #[test]
+    fn parses_hashed_store_assets() {
+        let v = json!({"response": {"store_items": [{"appid": 3241660, "assets": {
+            "asset_url_format": "steam/apps/3241660/abc123/${FILENAME}?t=1",
+            "library_capsule": "library_600x900.jpg",
+            "header": "header.jpg"
+        }}]}});
+        let m = parse_store_assets(&v);
+        assert_eq!(
+            m["library_capsule"],
+            "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/3241660/abc123/library_600x900.jpg?t=1"
+        );
+        assert!(m.contains_key("header") && !m.contains_key("library_hero"));
+        assert!(parse_store_assets(&json!({})).is_empty());
+    }
     use crate::providers::testing::{tree, Fakes};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;

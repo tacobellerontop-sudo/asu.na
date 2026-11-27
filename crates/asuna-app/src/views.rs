@@ -6,12 +6,17 @@ use crate::theme::*;
 use asuna_core::*;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::Input;
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{Disableable, Sizable, TitleBar};
+use gpui_kit::component::{Disableable, Icon, IconName, Sizable, TitleBar};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
+use std::time::Duration;
 
-const CARD_W: f32 = 158.;
+const SIDEBAR_W: f32 = 248.;
+const PAGE_PAD: f32 = 32.;
+const CARD_MIN_W: f32 = 168.;
+const CARD_GAP: f32 = 20.;
 
 fn sid(s: impl Into<String>) -> ElementId {
     ElementId::Name(SharedString::from(s.into()))
@@ -30,7 +35,7 @@ fn dot(l: LauncherId) -> Div {
 }
 
 fn heading(text: impl Into<SharedString>) -> Div {
-    div().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).text_color(c(TEXT)).mt_6().mb_3().child(text.into())
+    div().text_size(px(20.)).font_weight(FontWeight::BOLD).text_color(c(TEXT)).mt_8().mb_4().child(text.into())
 }
 
 fn muted(text: impl Into<SharedString>) -> Div {
@@ -40,7 +45,7 @@ fn muted(text: impl Into<SharedString>) -> Div {
 fn empty_box(text: impl Into<SharedString>) -> Div {
     div()
         .p_10()
-        .rounded(px(10.))
+        .rounded(px(14.))
         .border_1()
         .border_dashed()
         .border_color(c(LINE))
@@ -54,10 +59,35 @@ fn one_line(d: Div) -> Div {
     d.overflow_hidden().whitespace_nowrap().text_ellipsis()
 }
 
+fn icon(name: IconName, size: f32, color: u32) -> Icon {
+    Icon::new(name).size(px(size)).text_color(c(color))
+}
+
+/// A short fade and rise, used when a page or panel appears.
+fn fade_in<E: IntoElement + Styled + 'static>(id: impl Into<ElementId>, el: E) -> AnimationElement<E> {
+    el.with_animation(id, Animation::new(Duration::from_millis(220)).with_easing(ease_out_quint()), |el, t| el.opacity(t))
+}
+
+/// Darker version of a launcher color, for backgrounds that carry white text.
+fn shade(hex: u32, keep: f32) -> u32 {
+    let ch = |shift: u32| ((((hex >> shift) & 0xff) as f32) * keep) as u32;
+    (ch(16) << 16) | (ch(8) << 8) | ch(0)
+}
+
+fn title_initials(title: &str) -> String {
+    title
+        .split_whitespace()
+        .filter_map(|w| w.chars().find(|c| c.is_alphanumeric()))
+        .take(2)
+        .collect::<String>()
+        .to_uppercase()
+}
+
 impl Render for AsunaApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let main_w = f32::from(window.viewport_size().width) - SIDEBAR_W - PAGE_PAD * 2.;
         let body = match self.view {
-            Page::Library => self.render_library(cx).into_any_element(),
+            Page::Library => self.render_library(main_w, cx).into_any_element(),
             Page::Store => self.render_store(cx).into_any_element(),
             Page::Launchers => self.render_launchers(cx).into_any_element(),
             Page::Settings => self.render_settings(cx).into_any_element(),
@@ -72,12 +102,16 @@ impl Render for AsunaApp {
             .font_family(".SystemUIFont")
             .child(self.render_title_bar(cx))
             .child(
-                div()
-                    .flex()
-                    .flex_1()
-                    .min_h_0()
-                    .child(self.render_sidebar(window, cx))
-                    .child(div().id("main").flex_1().min_w_0().overflow_y_scroll().px_7().pb_16().child(body)),
+                div().flex().flex_1().min_h_0().child(self.render_sidebar(window, cx)).child(
+                    div()
+                        .id("main")
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_y_scroll()
+                        .px(px(PAGE_PAD))
+                        .pb_16()
+                        .child(fade_in(sid(format!("page-{:?}", self.view)), div().child(body))),
+                ),
             )
             .when_some(self.selected.clone(), |d, key| d.child(self.render_details(&key, cx)))
             .when(self.add_game.is_some(), |d| d.child(self.render_add_game(cx)))
@@ -89,12 +123,21 @@ impl AsunaApp {
     // ---------- title bar ----------
 
     fn render_title_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let status = if self.scanning {
-            "Scanning launchers…".to_string()
-        } else {
-            let installed = self.games.iter().filter(|g| g.info.installed).count();
-            format!("{installed} installed · {} in library", self.library_games().count())
-        };
+        let installed = self.games.iter().filter(|g| g.info.installed && !g.info.catalog_only).count();
+        let total = self.library_games().count();
+        let status = div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .text_size(px(12.))
+            .text_color(c(MUTED))
+            .when(self.scanning, |d| d.child(Spinner::new().xsmall().color(c(ACCENT).into())).child("Scanning your launchers…"))
+            .when(!self.scanning, |d| {
+                d.child(div().size(px(6.)).rounded_full().bg(c(OK)))
+                    .child(format!("{installed} installed"))
+                    .child(div().text_color(c(SUBTLE)).child("·"))
+                    .child(format!("{total} in library"))
+            });
         TitleBar::new().bg(c(PANEL)).border_b_1().border_color(c(LINE)).child(
             div()
                 .flex()
@@ -104,8 +147,8 @@ impl AsunaApp {
                 .pr_2()
                 .child(
                     div()
-                        .size(px(20.))
-                        .rounded(px(6.))
+                        .size(px(22.))
+                        .rounded(px(7.))
                         .bg(accent_gradient())
                         .flex()
                         .items_center()
@@ -115,14 +158,23 @@ impl AsunaApp {
                         .text_color(gpui_kit::white())
                         .child("A"),
                 )
-                .child(div().font_weight(FontWeight::SEMIBOLD).child("AsuNa"))
-                .child(div().text_size(px(12.)).text_color(c(MUTED)).child(status))
+                .child(
+                    div()
+                        .flex()
+                        .items_baseline()
+                        .gap_1()
+                        .child(div().text_size(px(14.)).font_weight(FontWeight::BOLD).child("AsuNa"))
+                        .child(div().text_size(px(12.)).text_color(c(SUBTLE)).child("Launcher")),
+                )
+                .child(div().w(px(SIDEBAR_W - 150.)))
+                .child(status)
                 .child(div().flex_1())
                 .child(
                     Button::new("tb-rescan")
                         .ghost()
                         .xsmall()
-                        .label(if self.scanning { "Scanning…" } else { "Rescan" })
+                        .icon(IconName::RefreshCw)
+                        .tooltip("Rescan launchers")
                         .disabled(self.scanning)
                         .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.rescan(cx))),
                 ),
@@ -132,19 +184,25 @@ impl AsunaApp {
     // ---------- sidebar ----------
 
     fn render_sidebar(&self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let nav = |id: &'static str, label: &'static str, view: Page, cx: &mut Context<Self>| {
+        let nav = |id: &'static str, ic: IconName, label: &'static str, view: Page, cx: &mut Context<Self>| {
             let active = self.view == view;
             div()
                 .id(id)
+                .relative()
+                .flex()
+                .items_center()
+                .gap_3()
+                .h(px(38.))
                 .px_3()
-                .py_2()
-                .rounded(px(8.))
-                .text_size(px(15.))
+                .rounded(px(10.))
+                .text_size(px(14.))
                 .font_weight(FontWeight::SEMIBOLD)
                 .cursor_pointer()
                 .text_color(c(if active { TEXT } else { MUTED }))
                 .when(active, |d| d.bg(c(PANEL_2)))
-                .hover(|s| s.text_color(c(TEXT)))
+                .hover(|s| s.text_color(c(TEXT)).bg(c(PANEL_2)))
+                .when(active, |d| d.child(div().absolute().left_0().top(px(10.)).bottom(px(10.)).w(px(3.)).rounded_full().bg(accent_gradient())))
+                .child(icon(ic, 17., if active { ACCENT } else { MUTED }))
                 .child(label)
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     this.view = view;
@@ -157,34 +215,52 @@ impl AsunaApp {
                 .flex()
                 .items_center()
                 .justify_between()
+                .h(px(32.))
                 .px_3()
-                .py(px(7.))
                 .rounded(px(8.))
                 .cursor_pointer()
+                .text_size(px(13.))
                 .text_color(c(if active { TEXT } else { MUTED }))
                 .when(active, |d| d.bg(c(PANEL_2)))
-                .hover(|s| s.text_color(c(TEXT)))
+                .hover(|s| s.text_color(c(TEXT)).bg(c(PANEL_2)))
                 .child(label)
-                .when_some(count, |d, n| d.child(div().text_size(px(12.)).text_color(c(MUTED)).child(n.to_string())))
+                .when_some(count, |d, n| {
+                    d.child(
+                        div()
+                            .min_w(px(22.))
+                            .px(px(6.))
+                            .py(px(1.))
+                            .rounded_full()
+                            .flex()
+                            .justify_center()
+                            .text_size(px(11.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .bg(c(if active { HOVER } else { PANEL_2 }))
+                            .text_color(c(if active { TEXT } else { MUTED }))
+                            .child(n.to_string()),
+                    )
+                })
         };
-        let side_label = |t: &'static str| div().px_3().pt_4().pb_1().text_size(px(11.)).text_color(c(MUTED)).child(t.to_uppercase());
+        let side_label =
+            |t: &'static str| div().px_3().pt_5().pb_2().text_size(px(11.)).font_weight(FontWeight::SEMIBOLD).text_color(c(SUBTLE)).child(t.to_uppercase());
 
         let mut col = div()
             .id("sidebar")
-            .w(px(232.))
+            .w(px(SIDEBAR_W))
             .flex_none()
             .flex()
             .flex_col()
             .gap(px(2.))
-            .p_3()
+            .px_3()
+            .py_4()
             .bg(c(PANEL))
             .border_r_1()
             .border_color(c(LINE))
             .overflow_y_scroll()
-            .child(nav("nav-lib", "Library", Page::Library, cx))
-            .child(nav("nav-store", "Get games", Page::Store, cx))
-            .child(nav("nav-launchers", "Launchers", Page::Launchers, cx))
-            .child(nav("nav-settings", "Settings", Page::Settings, cx));
+            .child(nav("nav-lib", IconName::GalleryVerticalEnd, "Library", Page::Library, cx))
+            .child(nav("nav-store", IconName::Globe, "Get games", Page::Store, cx))
+            .child(nav("nav-launchers", IconName::LayoutDashboard, "Launchers", Page::Launchers, cx))
+            .child(nav("nav-settings", IconName::Settings, "Settings", Page::Settings, cx));
 
         if self.view == Page::Library {
             col = col.child(side_label("Shelves"));
@@ -218,26 +294,47 @@ impl AsunaApp {
         }
 
         col.child(div().flex_1().min_h_4()).child(
-            Button::new("add-game")
-                .ghost()
-                .small()
-                .label("+ Add a game")
+            div()
+                .id("add-game")
+                .flex()
+                .items_center()
+                .justify_center()
+                .gap_2()
+                .h(px(38.))
+                .rounded(px(10.))
+                .border_1()
+                .border_dashed()
+                .border_color(c(HOVER))
+                .text_size(px(13.))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(c(MUTED))
+                .cursor_pointer()
+                .hover(|s| s.border_color(c(ACCENT)).text_color(c(TEXT)))
+                .child(icon(IconName::Plus, 15., MUTED))
+                .child("Add a game")
                 .on_click(cx.listener(|this, _: &ClickEvent, window, cx| this.open_add_game(window, cx))),
         )
     }
 
     // ---------- library ----------
 
-    fn render_library(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut sort_row = div().flex().gap_1();
+    fn render_library(&self, main_w: f32, cx: &mut Context<Self>) -> impl IntoElement {
+        let mut seg = div().flex().p(px(3.)).gap(px(2.)).rounded(px(10.)).bg(c(PANEL)).border_1().border_color(c(LINE));
         for s in Sort::ALL {
             let active = self.sort == s && self.shelf != Shelf::Recent;
-            sort_row = sort_row.child(
-                Button::new(sid(format!("sort-{s:?}")))
-                    .small()
-                    .label(s.label())
-                    .when(active, |b| b.primary())
-                    .when(!active, |b| b.ghost())
+            seg = seg.child(
+                div()
+                    .id(sid(format!("sort-{s:?}")))
+                    .px_3()
+                    .py(px(5.))
+                    .rounded(px(7.))
+                    .text_size(px(13.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .cursor_pointer()
+                    .text_color(c(if active { TEXT } else { MUTED }))
+                    .when(active, |d| d.bg(c(HOVER)))
+                    .hover(|st| st.text_color(c(TEXT)))
+                    .child(s.label())
                     .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                         this.sort = s;
                         cx.notify();
@@ -248,19 +345,27 @@ impl AsunaApp {
             .flex()
             .items_center()
             .gap_3()
-            .pt_5()
-            .child(div().w(px(380.)).child(Input::new(&self.search).cleanable(true)))
-            .child(sort_row);
+            .pt_6()
+            .child(div().w(px(340.)).child(Input::new(&self.search).prefix(icon(IconName::Search, 15., MUTED)).cleanable(true)))
+            .child(div().flex_1())
+            .child(seg);
 
         let mut page = div().child(toolbar);
 
         let recent = self.continue_playing();
-        if self.shelf == Shelf::All && self.launcher_filter.is_none() && self.query.is_empty() && !recent.is_empty() {
-            let mut row = div().flex().gap_4();
-            for g in recent {
-                row = row.child(self.render_hero(g, cx));
+        let show_home = self.shelf == Shelf::All && self.launcher_filter.is_none() && self.query.is_empty();
+        if show_home {
+            if let Some((first, rest)) = recent.split_first() {
+                page = page.child(self.render_featured(first, cx));
+                if !rest.is_empty() {
+                    let tile_w = ((main_w - CARD_GAP * 2.) / 3.).clamp(200., 380.);
+                    let mut row = div().flex().gap(px(CARD_GAP));
+                    for g in rest.iter().take(3) {
+                        row = row.child(self.render_recent_tile(g, tile_w, cx));
+                    }
+                    page = page.child(heading("Jump back in")).child(row);
+                }
             }
-            page = page.child(heading("Jump back in")).child(row);
         }
 
         let mut title = self.shelf.label().to_string();
@@ -268,7 +373,16 @@ impl AsunaApp {
             title = format!("{title} · {}", l.label());
         }
         let games = self.visible_games();
-        page = page.child(heading(title));
+        page = page.child(
+            div()
+                .flex()
+                .items_baseline()
+                .gap_3()
+                .mt_8()
+                .mb_4()
+                .child(div().text_size(px(20.)).font_weight(FontWeight::BOLD).child(title))
+                .child(div().text_size(px(13.)).text_color(c(SUBTLE)).child(format!("{} games", games.len()))),
+        );
         if self.games.is_empty() && self.scanning {
             page.child(empty_box("Looking for games across your launchers…"))
         } else if games.is_empty() {
@@ -278,9 +392,11 @@ impl AsunaApp {
                 "Nothing matches this filter."
             }))
         } else {
-            let mut grid = div().flex().flex_wrap().gap_x_4().gap_y_5();
+            let cols = ((main_w + CARD_GAP) / (CARD_MIN_W + CARD_GAP)).floor().max(2.);
+            let card_w = ((main_w - CARD_GAP * (cols - 1.)) / cols).floor() - 1.;
+            let mut grid = div().flex().flex_wrap().gap_x(px(CARD_GAP)).gap_y(px(26.));
             for g in games {
-                grid = grid.child(self.render_card(g, cx));
+                grid = grid.child(self.render_card(g, card_w, cx));
             }
             page.child(grid)
         }
@@ -296,79 +412,130 @@ impl AsunaApp {
         }
     }
 
-    /// Box art with a fallback chain: cover, then header, then a generated tile.
+    /// Portrait cover with a fallback chain: box art, then the landscape header framed on a
+    /// tinted backdrop, then a typographic tile in the launcher's colors.
     fn render_cover(&self, g: &Game, large: bool) -> AnyElement {
-        let cover = self.art_image(g.info.art.cover.as_ref());
-        let header = self.art_image(g.info.art.header.as_ref());
-        let dim = !g.info.installed;
-        if let Some(p) = cover.or(header) {
-            return img(p)
+        let l = g.info.launcher;
+        if let Some(p) = self.art_image(g.info.art.cover.as_ref()) {
+            return img(p).size_full().object_fit(ObjectFit::Cover).into_any_element();
+        }
+        let backdrop = linear_gradient(
+            160.,
+            linear_color_stop(c(shade(l.color(), 0.42)), 0.),
+            linear_color_stop(c(shade(l.color(), 0.12)), 1.),
+        );
+        if let Some(p) = self.art_image(g.info.art.header.as_ref()) {
+            return div()
                 .size_full()
-                .object_fit(ObjectFit::Cover)
-                .when(dim, |i| i.grayscale(true).opacity(0.65))
+                .relative()
+                .bg(backdrop)
+                .flex()
+                .flex_col()
+                .justify_center()
+                .child(img(p.clone()).absolute().inset_0().size_full().object_fit(ObjectFit::Cover).opacity(0.22))
+                .child(div().w_full().h(relative(0.47)).flex_none().shadow_lg().child(img(p).size_full().object_fit(ObjectFit::Cover)))
                 .into_any_element();
         }
-        let initials: String = g
-            .info
-            .title
-            .split_whitespace()
-            .filter_map(|w| w.chars().find(|c| c.is_alphanumeric()))
-            .take(2)
-            .collect::<String>()
-            .to_uppercase();
         div()
             .size_full()
-            .p_3()
+            .relative()
+            .overflow_hidden()
+            .p(px(if large { 28. } else { 16. }))
             .flex()
             .flex_col()
-            .justify_between()
-            .bg(linear_gradient(
-                150.,
-                linear_color_stop(launcher_tint(g.info.launcher, if dim { 0x40 } else { 0x88 }), 0.),
-                linear_color_stop(c(PANEL), 0.75),
-            ))
-            .child(div().text_size(px(if large { 44. } else { 32. })).font_weight(FontWeight::EXTRA_BOLD).child(initials))
-            .when(!large, |d| d.child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).child(g.info.title.clone())))
+            .justify_end()
+            .bg(backdrop)
+            .child(
+                div()
+                    .absolute()
+                    .top(px(-20.))
+                    .right(px(-14.))
+                    .text_size(px(if large { 200. } else { 120. }))
+                    .font_weight(FontWeight::BLACK)
+                    .text_color(ca(0xffffff, 0x10))
+                    .child(title_initials(&g.info.title)),
+            )
+            .child(
+                div()
+                    .text_size(px(if large { 30. } else { 19. }))
+                    .line_height(relative(1.15))
+                    .font_weight(FontWeight::EXTRA_BOLD)
+                    .text_color(gpui_kit::white())
+                    .line_clamp(3)
+                    .child(g.info.title.clone()),
+            )
+            .child(div().mt_2().w(px(28.)).h(px(3.)).rounded_full().bg(c(l.color())))
             .into_any_element()
     }
 
-    fn render_card(&self, g: &Game, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_card(&self, g: &Game, card_w: f32, cx: &mut Context<Self>) -> impl IntoElement {
         let key = g.key.clone();
         let key2 = g.key.clone();
         let installed = g.info.installed;
         let group = SharedString::from(format!("card-{}", g.key));
+        let meta = match (installed, format_playtime(g.info.playtime_minutes)) {
+            (true, Some(t)) if g.info.playtime_minutes.unwrap_or(0) > 0 => format!("{} · {t}", g.info.launcher.short()),
+            _ => g.info.launcher.short().to_string(),
+        };
         div()
             .id(sid(format!("card-{}", g.key)))
             .group(group.clone())
-            .w(px(CARD_W))
+            .w(px(card_w))
             .flex_none()
             .cursor_pointer()
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.open_details(&key, cx)))
             .child(
                 div()
                     .relative()
-                    .w(px(CARD_W))
-                    .h(px(CARD_W * 1.5))
-                    .rounded(px(10.))
+                    .w(px(card_w))
+                    .h(px(card_w * 1.5))
+                    .rounded(px(12.))
                     .overflow_hidden()
                     .bg(c(PANEL_2))
+                    .border_1()
+                    .border_color(ca(0xffffff, 0x0c))
                     .shadow_md()
+                    .group_hover(group.clone(), |s| s.border_color(ca(0xffffff, 0x40)))
                     .child(self.render_cover(g, false))
-                    .when(g.favorite, |d| d.child(div().absolute().top_2().right_2().text_color(c(FAV)).child("★")))
+                    .when(installed, |d| {
+                        d.child(
+                            div()
+                                .absolute()
+                                .top_2()
+                                .left_2()
+                                .size(px(22.))
+                                .rounded_full()
+                                .bg(ca(0x000000, 0xa0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(icon(IconName::Check, 13., OK)),
+                        )
+                    })
+                    .when(g.favorite, |d| {
+                        d.child(div().absolute().top_2().right_2().size(px(22.)).rounded_full().bg(ca(0, 0xa0)).flex().items_center().justify_center().child(icon(
+                            IconName::StarFill,
+                            12.,
+                            FAV,
+                        )))
+                    })
                     .child(
                         div()
                             .absolute()
-                            .bottom_0()
-                            .left_0()
-                            .right_0()
-                            .p_2()
+                            .inset_0()
+                            .flex()
+                            .flex_col()
+                            .justify_end()
+                            .p_3()
+                            .bg(linear_gradient(180., linear_color_stop(ca(0, 0), 0.45), linear_color_stop(ca(0, 0xe0), 1.)))
                             .invisible()
-                            .group_hover(group, |s| s.visible())
+                            .group_hover(group.clone(), |s| s.visible())
                             .child(
                                 Button::new(sid(format!("play-{}", g.key)))
                                     .w_full()
                                     .small()
-                                    .label(if installed { "▶  Play" } else { "↓  Install" })
+                                    .icon(if installed { IconName::Play } else { IconName::ArrowDown })
+                                    .label(if installed { "Play" } else { "Install" })
                                     .when(installed, |b| b.primary())
                                     .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                                         cx.stop_propagation();
@@ -380,60 +547,173 @@ impl AsunaApp {
             )
             .child(
                 div()
-                    .pt_2()
-                    .child(one_line(div().font_weight(FontWeight::SEMIBOLD)).child(g.info.title.clone()))
+                    .pt(px(10.))
+                    .child(one_line(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD)).child(g.info.title.clone()))
                     .child(
                         div()
+                            .mt(px(2.))
                             .flex()
                             .items_center()
-                            .gap_2()
+                            .gap(px(6.))
                             .text_size(px(12.))
-                            .text_color(c(MUTED))
-                            .child(dot(g.info.launcher))
-                            .child(g.info.launcher.short())
-                            .when(!installed, |d| d.child(tag("Not installed")))
+                            .text_color(c(SUBTLE))
+                            .child(dot(g.info.launcher).size(px(6.)))
+                            .child(meta)
                             .when(g.launch_mode == LaunchMode::Direct, |d| d.child(tag("Direct"))),
                     ),
             )
     }
 
-    fn render_hero(&self, g: &Game, cx: &mut Context<Self>) -> impl IntoElement {
+    /// The big banner for the game you played last.
+    fn render_featured(&self, g: &Game, cx: &mut Context<Self>) -> impl IntoElement {
         let key = g.key.clone();
         let key2 = g.key.clone();
-        let header = self.art_image(g.info.art.header.as_ref());
+        let l = g.info.launcher;
+        let bg_img = self.art_image(g.info.art.hero.as_ref()).or_else(|| self.art_image(g.info.art.header.as_ref()));
+        // Size the logo from its own proportions so it sits flush left at a consistent height.
+        let logo = self.art_image(g.info.art.logo.as_ref()).and_then(|p| {
+            let (w, h) = png_size(&p)?;
+            let (max_w, max_h) = (380., 110.);
+            let scale = (max_w / w).min(max_h / h);
+            Some((p, w * scale, h * scale))
+        });
+        let meta: Vec<String> = [Some(l.label().to_string()), format_ago(g.info.last_played).map(|a| format!("Played {}", a.to_lowercase())), format_playtime(g.info.playtime_minutes).map(|t| format!("{t} total"))]
+            .into_iter()
+            .flatten()
+            .collect();
+        let mut meta_row = div().flex().items_center().gap_2().text_size(px(13.)).text_color(ca(0xffffff, 0xc0)).child(dot(l));
+        for (i, m) in meta.into_iter().enumerate() {
+            if i > 0 {
+                meta_row = meta_row.child(div().text_color(ca(0xffffff, 0x60)).child("·"));
+            }
+            meta_row = meta_row.child(m);
+        }
         div()
-            .id(sid(format!("hero-{}", g.key)))
+            .id(sid(format!("featured-{}", g.key)))
             .relative()
-            .flex_1()
-            .max_w(px(320.))
-            .h(px(150.))
-            .rounded(px(10.))
+            .mt_6()
+            .w_full()
+            .h(px(320.))
+            .rounded(px(18.))
             .overflow_hidden()
             .cursor_pointer()
-            .bg(linear_gradient(150., linear_color_stop(launcher_tint(g.info.launcher, 0x77), 0.), linear_color_stop(c(PANEL), 1.)))
+            .border_1()
+            .border_color(ca(0xffffff, 0x10))
+            .bg(linear_gradient(120., linear_color_stop(c(shade(l.color(), 0.55)), 0.), linear_color_stop(c(PANEL), 1.)))
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.open_details(&key, cx)))
-            .when_some(header, |d, p| d.child(img(p).size_full().object_fit(ObjectFit::Cover)))
+            .when_some(bg_img, |d, p| d.child(img(p).absolute().inset_0().size_full().object_fit(ObjectFit::Cover)))
+            .child(div().absolute().inset_0().bg(linear_gradient(90., linear_color_stop(ca(BG, 0xf0), 0.), linear_color_stop(ca(BG, 0x00), 0.7))))
+            .child(div().absolute().inset_0().bg(linear_gradient(180., linear_color_stop(ca(BG, 0), 0.5), linear_color_stop(ca(BG, 0xc0), 1.))))
+            .child(
+                div()
+                    .absolute()
+                    .left(px(36.))
+                    .bottom(px(32.))
+                    .max_w(px(520.))
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(c(ACCENT))
+                            .child("CONTINUE PLAYING"),
+                    )
+                    .child(match logo {
+                        Some((p, w, h)) => img(p).w(px(w)).h(px(h)).into_any_element(),
+                        None => div()
+                            .text_size(px(40.))
+                            .line_height(relative(1.05))
+                            .font_weight(FontWeight::BLACK)
+                            .line_clamp(2)
+                            .child(g.info.title.clone())
+                            .into_any_element(),
+                    })
+                    .child(meta_row)
+                    .child(
+                        div().flex().gap_2().mt_2().child(
+                            Button::new(sid(format!("feat-play-{}", g.key)))
+                                .primary()
+                                .large()
+                                .icon(IconName::Play)
+                                .label(if g.launch_mode == LaunchMode::Direct { "Play (direct)" } else { "Play" })
+                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                    cx.stop_propagation();
+                                    this.run_game_action(&key2, GameAction::Launch, window, cx);
+                                })),
+                        ),
+                    ),
+            )
+    }
+
+    fn render_recent_tile(&self, g: &Game, w: f32, cx: &mut Context<Self>) -> impl IntoElement {
+        let key = g.key.clone();
+        let key2 = g.key.clone();
+        let l = g.info.launcher;
+        let header = self.art_image(g.info.art.header.as_ref()).or_else(|| self.art_image(g.info.art.hero.as_ref()));
+        let has_art = header.is_some();
+        let group = SharedString::from(format!("recent-{}", g.key));
+        div()
+            .id(sid(format!("recent-{}", g.key)))
+            .group(group.clone())
+            .relative()
+            .w(px(w))
+            .h(px(w * 0.467))
+            .flex_none()
+            .rounded(px(14.))
+            .overflow_hidden()
+            .cursor_pointer()
+            .border_1()
+            .border_color(ca(0xffffff, 0x0c))
+            .hover(|s| s.border_color(ca(0xffffff, 0x40)))
+            .bg(linear_gradient(150., linear_color_stop(c(shade(l.color(), 0.45)), 0.), linear_color_stop(c(shade(l.color(), 0.12)), 1.)))
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.open_details(&key, cx)))
+            .when_some(header, |d, p| d.child(img(p).absolute().inset_0().size_full().object_fit(ObjectFit::Cover)))
+            .when(!has_art, |d| {
+                d.child(
+                    div()
+                        .absolute()
+                        .top(px(-16.))
+                        .right(px(-8.))
+                        .text_size(px(110.))
+                        .font_weight(FontWeight::BLACK)
+                        .text_color(ca(0xffffff, 0x10))
+                        .child(title_initials(&g.info.title)),
+                )
+            })
             .child(
                 div()
                     .absolute()
                     .bottom_0()
                     .left_0()
                     .right_0()
-                    .px_3()
-                    .py_2()
+                    .px_4()
+                    .pt_8()
+                    .pb_3()
                     .flex()
-                    .items_center()
+                    .items_end()
                     .justify_between()
-                    .bg(linear_gradient(180., linear_color_stop(ca(0, 0), 0.), linear_color_stop(ca(0, 0xd0), 1.)))
-                    .child(one_line(div().font_weight(FontWeight::SEMIBOLD)).child(g.info.title.clone()))
+                    .gap_3()
+                    .bg(linear_gradient(180., linear_color_stop(ca(0, 0), 0.), linear_color_stop(ca(0, 0xd8), 1.)))
                     .child(
-                        Button::new(sid(format!("hero-play-{}", g.key)))
-                            .xsmall()
-                            .label("▶ Play")
-                            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                                cx.stop_propagation();
-                                this.run_game_action(&key2, GameAction::Launch, window, cx);
-                            })),
+                        div()
+                            .min_w_0()
+                            .child(one_line(div().font_weight(FontWeight::BOLD)).child(g.info.title.clone()))
+                            .child(div().text_size(px(12.)).text_color(ca(0xffffff, 0xa0)).child(format_ago(g.info.last_played).unwrap_or_default())),
+                    )
+                    .child(
+                        div().invisible().group_hover(group, |s| s.visible()).child(
+                            Button::new(sid(format!("recent-play-{}", g.key)))
+                                .primary()
+                                .small()
+                                .icon(IconName::Play)
+                                .label("Play")
+                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                    cx.stop_propagation();
+                                    this.run_game_action(&key2, GameAction::Launch, window, cx);
+                                })),
+                        ),
                     ),
             )
     }
@@ -531,7 +811,12 @@ impl AsunaApp {
             .overflow_y_scroll()
             .occlude()
             .on_click(|_, _, cx| cx.stop_propagation())
-            .child(div().h(px(280.)).relative().overflow_hidden().child(self.render_cover(g, true)).child(
+            .child(div().h(px(280.)).relative().overflow_hidden().child(
+                match self.art_image(g.info.art.hero.as_ref()).or_else(|| self.art_image(g.info.art.header.as_ref())) {
+                    Some(p) => img(p).size_full().object_fit(ObjectFit::Cover).into_any_element(),
+                    None => self.render_cover(g, true),
+                },
+            ).child(
                 div().absolute().bottom_0().left_0().right_0().h(px(120.)).bg(linear_gradient(
                     180.,
                     linear_color_stop(ca(PANEL, 0), 0.),
@@ -1090,7 +1375,20 @@ impl AsunaApp {
     }
 }
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// Width and height from a PNG header, without decoding the image.
+fn png_size(path: &Path) -> Option<(f32, f32)> {
+    use std::io::Read;
+    let mut head = [0u8; 24];
+    std::fs::File::open(path).ok()?.read_exact(&mut head).ok()?;
+    if &head[..8] != b"\x89PNG\r\n\x1a\n" {
+        return None;
+    }
+    let w = u32::from_be_bytes(head[16..20].try_into().ok()?);
+    let h = u32::from_be_bytes(head[20..24].try_into().ok()?);
+    (w > 0 && h > 0).then_some((w as f32, h as f32))
+}
 
 fn tag(text: impl Into<SharedString>) -> Div {
     div().ml_1().px(px(6.)).rounded(px(4.)).text_size(px(11.)).bg(c(PANEL_2)).border_1().border_color(c(LINE)).child(text.into())

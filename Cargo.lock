@@ -321,7 +321,7 @@ dependencies = [
 
 [[package]]
 name = "asuna-app"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "asuna-core",
  "env_logger",
@@ -332,7 +332,7 @@ dependencies = [
 
 [[package]]
 name = "asuna-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "auto-launch",
  "base64",
